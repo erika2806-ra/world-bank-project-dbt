@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: marts_country_indicators
+    description: "Indicateurs de la Banque mondiale, une ligne par pays et par année."
+
+    columns:
+      - name: country_year_key
+        description: "Clé de substitution unique générée à partir du code ISO 3 du pays et de l'année."
+        data_tests:
+          - not_null
+          - unique

@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: world_bank
+    description: "Données brutes issues de l'API World Bank, chargées dans BigQuery par le script load_data.py. Ne pas modifier directement."
+    project: data-quest-erika
+    dataset: world_bank_raw
+
+    tables:
+      - name: raw_data
+        description: "Données brutes des indicateurs économiques, démographiques, sociaux, éducatifs et environnementaux de la Banque mondiale."
