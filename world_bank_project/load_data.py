@@ -1,18 +1,24 @@
-#load_data.py
+# load_data.py
 
-import pandas as pd
-import requests
-import time
-
-from google.cloud import bigquery
-from datetime import datetime, timezone
-from dotenv import load_dotenv
 import hashlib
 import json
+import time
+from datetime import datetime, timezone
 
+import requests
+from dotenv import load_dotenv
+from google.api_core.exceptions import NotFound
+from google.cloud import bigquery
+
+
+# Charge GOOGLE_APPLICATION_CREDENTIALS depuis .env
 load_dotenv()
 
-# Indicateurs World Bank sélectionnés pour le projet
+
+# ---------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------
+
 INDICATORS = {
     "NY.GDP.MKTP.CD": "PIB",
     "NY.GDP.PCAP.CD": "PIB_par_habitant",
@@ -22,7 +28,7 @@ INDICATORS = {
     "SL.UEM.TOTL.ZS": "Chomage",
     "FP.CPI.TOTL.ZG": "Inflation",
     "EG.ELC.ACCS.ZS": "Acces_electricite",
-    "EN.ATM.CO2E.PC": "CO2_par_habitant",
+    "EN.GHG.CO2.PC.CE.AR5": "CO2_par_habitant",
     "SP.DYN.CBRT.IN": "Taux_natalite",
     "SE.SEC.ENRR": "Scolarisation_secondaire",
     "SE.TER.ENRR": "Scolarisation_superieur",
@@ -38,202 +44,349 @@ TABLE_ID = "raw_data"
 
 FULL_TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
 
+# Nombre maximum de hash récents récupérés depuis BigQuery.
+# À ajuster si le volume du projet devient beaucoup plus important.
+HASH_LOOKBACK_LIMIT = 500000
+
+
+# ---------------------------------------------------------
+# SCHÉMA DE LA TABLE RAW
+# ---------------------------------------------------------
+
+RAW_SCHEMA = [
+    bigquery.SchemaField(
+        "indicator",
+        "RECORD",
+        fields=[
+            bigquery.SchemaField("id", "STRING"),
+            bigquery.SchemaField("value", "STRING"),
+        ],
+    ),
+    bigquery.SchemaField(
+        "country",
+        "RECORD",
+        fields=[
+            bigquery.SchemaField("id", "STRING"),
+            bigquery.SchemaField("value", "STRING"),
+        ],
+    ),
+    bigquery.SchemaField("countryiso3code", "STRING"),
+    bigquery.SchemaField("date", "STRING"),
+    bigquery.SchemaField("value", "FLOAT64"),
+    bigquery.SchemaField("unit", "STRING"),
+    bigquery.SchemaField("obs_status", "STRING"),
+    bigquery.SchemaField("decimal", "INTEGER"),
+    bigquery.SchemaField("row_hash", "STRING"),
+    bigquery.SchemaField("inserted_at", "TIMESTAMP"),
+]
+
+
+# ---------------------------------------------------------
+# HASH
+# ---------------------------------------------------------
+
 def calculer_hash(row):
-    """Calcule un hash unique à partir des données d'une ligne."""
+    """
+    Calcule un hash SHA-256 à partir de la ligne brute
+    telle qu'elle est renvoyée par l'API.
+
+    inserted_at n'est pas inclus dans le hash.
+    """
+
     contenu = json.dumps(
         row,
         sort_keys=True,
         default=str,
+        ensure_ascii=False,
     )
-    return hashlib.sha256(contenu.encode("utf-8")).hexdigest()
+
+    return hashlib.sha256(
+        contenu.encode("utf-8")
+    ).hexdigest()
+
+
+# ---------------------------------------------------------
+# APPEL D'UNE PAGE DE L'API
+# ---------------------------------------------------------
+
+def recuperer_page(code, page):
+    """
+    Récupère une page de données pour un indicateur World Bank.
+    """
+
+    url = (
+        "https://api.worldbank.org/v2/"
+        f"country/all/indicator/{code}"
+    )
+
+    params = {
+        "format": "json",
+        "per_page": 20000,
+        "page": page,
+    }
+
+    response = requests.get(
+        url,
+        params=params,
+        timeout=30,
+    )
+
+    response.raise_for_status()
+
+    try:
+        data = response.json()
+    except requests.exceptions.JSONDecodeError as e:
+        raise ValueError(
+            f"Réponse non JSON pour l'indicateur {code}"
+        ) from e
+
+    if (
+        not isinstance(data, list)
+        or len(data) < 2
+        or not isinstance(data[0], dict)
+        or data[1] is None
+    ):
+        raise ValueError(
+            f"Structure de réponse inattendue pour {code}"
+        )
+
+    return data[0], data[1]
+
+
+# ---------------------------------------------------------
+# RÉCUPÉRATION DES DONNÉES WORLD BANK
+# ---------------------------------------------------------
 
 def recuperer_donnees_world_bank():
-    """Récupère les indicateurs sélectionnés depuis l'API World Bank."""
+    """
+    Récupère les données World Bank dans leur format long.
 
-    dfs = []
+    Une ligne correspond à :
+    pays + année + indicateur.
+    """
 
-    for code, name in INDICATORS.items():
+    lignes = []
 
-        url = f"https://api.worldbank.org/v2/country/all/indicator/{code}"
-        params = {
-            "format": "json",
-            "per_page": 20000,
-        }
+    for code, nom in INDICATORS.items():
 
-        print(f"\n🔎 Récupération : {name} ({code})")
-
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=30,
-            )
-        except requests.RequestException as e:
-            print(f"❌ Erreur de requête : {e}")
-            continue
-
-        if response.status_code != 200:
-            print(f"❌ Erreur HTTP : {response.status_code}")
-            continue
-
-        try:
-            data = response.json()
-        except requests.exceptions.JSONDecodeError:
-            print("❌ Réponse non-JSON")
-            continue
-
-        # Vérification de la structure de la réponse
-        if (
-            not isinstance(data, list)
-            or len(data) < 2
-            or not isinstance(data[0], dict)
-            or "total" not in data[0]
-            or data[1] is None
-        ):
-            print("❌ Réponse inattendue")
-            continue
-
-        total = data[0]["total"]
-        print(f"✅ {total} lignes récupérées")
-
-        df = pd.DataFrame(data[1])
-
-        if df.empty:
-            print("⚠️ Aucune donnée")
-            continue
-
-        # Récupération du nom du pays
-        df["country_name"] = df["country"].apply(
-            lambda x: x.get("value") if isinstance(x, dict) else None
+        print(
+            f"\n🔎 Récupération : {nom} ({code})"
         )
 
-        df = df[
-            [
-                "country_name",
-                "countryiso3code",
-                "date",
-                "value",
-            ]
-        ]
+        try:
+            metadata, premiere_page = recuperer_page(
+                code,
+                page=1,
+            )
 
-        df = df.rename(columns={"value": name})
+        except requests.RequestException as e:
+            print(
+                f"❌ Erreur HTTP pour {code} : {e}"
+            )
+            continue
 
-        dfs.append(df)
+        except ValueError as e:
+            print(f"❌ {e}")
+            continue
 
-        # Petite pause entre les appels API
+        total = int(
+            metadata.get("total", len(premiere_page))
+        )
+
+        pages = int(
+            metadata.get("pages", 1)
+        )
+
+        print(
+            f"✅ {total} lignes disponibles "
+            f"sur {pages} page(s)"
+        )
+
+        lignes_indicateur = list(premiere_page)
+
+        # Pagination si nécessaire
+        for page in range(2, pages + 1):
+
+            try:
+                _, donnees_page = recuperer_page(
+                    code,
+                    page,
+                )
+
+                lignes_indicateur.extend(
+                    donnees_page
+                )
+
+            except (
+                requests.RequestException,
+                ValueError,
+            ) as e:
+
+                raise RuntimeError(
+                    f"Échec lors de la récupération "
+                    f"de la page {page}/{pages} "
+                    f"pour {code}"
+                ) from e
+
+        print(
+            f"📥 {len(lignes_indicateur)} "
+            f"lignes réellement récupérées"
+        )
+
+        if len(lignes_indicateur) != total:
+            print(
+                "⚠️ Attention : le nombre de lignes "
+                "récupérées diffère du total annoncé "
+                "par l'API."
+            )
+
+        lignes.extend(lignes_indicateur)
+
+        # Petite pause entre deux indicateurs
         time.sleep(0.5)
 
-    if not dfs:
+    if not lignes:
         raise ValueError(
-            "Aucun indicateur n'a pu être récupéré depuis l'API World Bank."
+            "Aucune donnée n'a été récupérée "
+            "depuis l'API World Bank."
         )
 
-    # Fusion des différents indicateurs
-    df_final = dfs[0]
-
-    for df in dfs[1:]:
-        df_final = df_final.merge(
-            df,
-            on=[
-                "country_name",
-                "countryiso3code",
-                "date",
-            ],
-            how="outer",
-        )
-
-    # Nettoyage final
-    df_final = df_final.rename(
-        columns={"date": "annee"}
+    print(
+        f"\n📊 Nombre total de lignes RAW : "
+        f"{len(lignes)}"
     )
 
-    df_final["annee"] = pd.to_numeric(
-        df_final["annee"],
-        errors="coerce",
-    ).astype("Int64")
+    return lignes
 
-    df_final = df_final.sort_values(
-        ["country_name", "annee"]
-    ).reset_index(drop=True)
 
-    print("\n📊 Données finales :")
-    print(f"Nombre de lignes : {len(df_final)}")
-    print(f"Nombre de colonnes : {len(df_final.columns)}")
-    print(df_final.head())
+# ---------------------------------------------------------
+# RÉCUPÉRATION DES HASH DÉJÀ PRÉSENTS
+# ---------------------------------------------------------
 
-    return df_final
+def recuperer_hash_existants(client):
+    """
+    Récupère les hash les plus récents déjà présents
+    dans BigQuery.
+    """
+
+    try:
+        client.get_table(FULL_TABLE_ID)
+
+        print(
+            f"✅ Table trouvée : {FULL_TABLE_ID}"
+        )
+
+    except NotFound:
+
+        print(
+            "ℹ️ La table n'existe pas encore. "
+            "Elle sera créée."
+        )
+
+        return set()
+
+    query = f"""
+        SELECT row_hash
+        FROM `{FULL_TABLE_ID}`
+        WHERE row_hash IS NOT NULL
+        ORDER BY inserted_at DESC
+        LIMIT {HASH_LOOKBACK_LIMIT}
+    """
+
+    resultats = client.query(query).result()
+
+    hashes = {
+        row.row_hash
+        for row in resultats
+    }
+
+    print(
+        f"🔎 Hash récents vérifiés : "
+        f"{len(hashes)}"
+    )
+
+    return hashes
+
+
+# ---------------------------------------------------------
+# INGESTION BIGQUERY
+# ---------------------------------------------------------
 
 def ingest_data():
-    """Récupère les données World Bank et les charge dans BigQuery."""
+    """
+    Récupère les données World Bank et charge
+    uniquement les nouvelles lignes dans BigQuery.
+    """
 
-    print("\n=== INGESTION WORLD BANK → BIGQUERY ===")
-
-    # 1. Récupération des données depuis l'API
-    df = recuperer_donnees_world_bank()
-
-    # 2. Création du client BigQuery
-    client = bigquery.Client(project=PROJECT_ID)
-
-    # 3. Création d'une copie pour préparer les données
-    df = df.copy()
-
-    # 4. Ajout du hash de chaque ligne
-    df["row_hash"] = df.apply(
-        lambda row: calculer_hash(row.to_dict()),
-        axis=1,
+    print(
+        "\n=== INGESTION WORLD BANK → BIGQUERY ==="
     )
 
-    # 5. Ajout de la date d'insertion
-    df["inserted_at"] = datetime.now(timezone.utc)
+    # 1. Récupération API
+    lignes_api = recuperer_donnees_world_bank()
 
-    # 6. Vérification si la table existe déjà
-    try:
-        table = client.get_table(FULL_TABLE_ID)
-        print(f"✅ Table trouvée : {FULL_TABLE_ID}")
+    # Pas de project=PROJECT_ID :
+    # le projet est déjà connu grâce aux credentials.
+    client = bigquery.Client()
 
-        # Récupération des hash déjà présents
-        query = f"""
-            SELECT row_hash
-            FROM `{FULL_TABLE_ID}`
-        """
+    # 2. Récupération des hash déjà présents
+    existing_hashes = recuperer_hash_existants(
+        client
+    )
 
-        existing_hashes = {
-            row.row_hash
-            for row in client.query(query).result()
-        }
+    # 3. Timestamp commun au chargement
+    inserted_at = datetime.now(
+        timezone.utc
+    ).isoformat()
 
-        print(f"🔎 Hash déjà présents : {len(existing_hashes)}")
+    nouvelles_lignes = []
 
-    except Exception:
-        print("ℹ️ La table n'existe pas encore, elle sera créée.")
-        existing_hashes = set()
+    # 4. Calcul du hash ligne par ligne
+    for ligne in lignes_api:
 
-    # 7. Suppression des lignes déjà présentes
-    df_new = df[
-        ~df["row_hash"].isin(existing_hashes)
-    ].copy()
+        # Copie de la réponse brute
+        ligne_raw = dict(ligne)
 
-    print(f"🆕 Nouvelles lignes : {len(df_new)}")
+        row_hash = calculer_hash(
+            ligne_raw
+        )
 
-    if df_new.empty:
-        print("✅ Aucune nouvelle donnée à insérer.")
+        # Ligne déjà présente : on ne la recharge pas
+        if row_hash in existing_hashes:
+            continue
+
+        ligne_raw["row_hash"] = row_hash
+        ligne_raw["inserted_at"] = inserted_at
+
+        nouvelles_lignes.append(
+            ligne_raw
+        )
+
+    print(
+        f"🆕 Nouvelles lignes : "
+        f"{len(nouvelles_lignes)}"
+    )
+
+    if not nouvelles_lignes:
+
+        print(
+            "✅ Aucune nouvelle donnée "
+            "à insérer."
+        )
+
         return
 
-    # 8. Configuration du chargement BigQuery
+    # 5. Configuration du chargement
     job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        autodetect=True,
+        schema=RAW_SCHEMA,
+        write_disposition=(
+            bigquery.WriteDisposition.WRITE_APPEND
+        ),
     )
 
-    # 9. Conversion des valeurs pandas problématiques
-    df_new = df_new.astype(object).where(
-        pd.notna(df_new),
-        None,
-    )
-
-    # 10. Chargement dans BigQuery
-    load_job = client.load_table_from_dataframe(
-        df_new,
+    # 6. Chargement direct JSON → BigQuery
+    load_job = client.load_table_from_json(
+        nouvelles_lignes,
         FULL_TABLE_ID,
         job_config=job_config,
     )
@@ -241,9 +394,15 @@ def ingest_data():
     load_job.result()
 
     print(
-        f"✅ {len(df_new)} nouvelles lignes insérées "
+        f"✅ {len(nouvelles_lignes)} "
+        f"nouvelles lignes insérées "
         f"dans {FULL_TABLE_ID}"
     )
+
+
+# ---------------------------------------------------------
+# EXÉCUTION DIRECTE
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
     ingest_data()

@@ -8,4 +8,39 @@ sources:
 
     tables:
       - name: raw_data
-        description: "Données brutes des indicateurs économiques, démographiques, sociaux, éducatifs et environnementaux de la Banque mondiale."
+        description: "Données World Bank au format long : une ligne par entité, année et indicateur."
+
+        columns:
+          - name: indicator
+            description: "Objet contenant le code et le nom de l'indicateur."
+
+          - name: country
+            description: "Objet contenant le code et le nom de l'entité géographique."
+
+          - name: countryiso3code
+            description: "Code ISO3 ou code World Bank de l'entité."
+
+          - name: date
+            description: "Année de l'observation telle que renvoyée par l'API."
+
+          - name: value
+            description: "Valeur brute de l'indicateur."
+
+          - name: unit
+            description: "Unité fournie par l'API World Bank."
+
+          - name: obs_status
+            description: "Statut de l'observation fourni par l'API."
+
+          - name: decimal
+            description: "Nombre de décimales fourni par l'API."
+
+          - name: row_hash
+            description: "Hash SHA-256 utilisé pour détecter les versions identiques d'une ligne."
+            data_tests:
+              - not_null
+
+          - name: inserted_at
+            description: "Date et heure d'insertion dans BigQuery."
+            data_tests:
+              - not_null

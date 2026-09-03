@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Dimension temporelle contenant les années présentes dans les données World Bank."
+
+    columns:
+      - name: annee
+        description: "Année de l'observation."
+        data_tests:
+          - not_null
+          - unique

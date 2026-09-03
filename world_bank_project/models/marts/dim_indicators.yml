@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: dim_indicators
+    description: "Dimension décrivant les indicateurs World Bank utilisés dans le projet."
+
+    columns:
+      - name: indicator_code
+        description: "Code officiel de l'indicateur World Bank."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: indicator_name
+        description: "Nom officiel de l'indicateur."
+
+      - name: indicator_label_fr
+        description: "Libellé métier en français utilisé notamment pour les analyses et visualisations Power BI."
+        data_tests:
+          - not_null
+          
+      - name: unit
+        description: "Unité associée à l'indicateur lorsque disponible."

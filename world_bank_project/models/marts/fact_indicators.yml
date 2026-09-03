@@ -1,0 +1,67 @@
+version: 2
+
+models:
+  - name: fact_indicators
+    description: "Table de faits World Bank. Une ligne représente un indicateur pour une entité et une année."
+
+    columns:
+      - name: countryiso3code
+        description: "Clé étrangère vers dim_pays."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_pays')
+                field: countryiso3code
+
+      - name: annee
+        description: "Clé étrangère vers dim_date."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: annee
+
+      - name: indicator_code
+        description: "Clé étrangère vers dim_indicators."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_indicators')
+                field: indicator_code
+
+      - name: valeur_originale
+        description: "Valeur réellement publiée par la Banque mondiale."
+
+      - name: valeur
+        description: "Valeur finale utilisée dans l'analyse après éventuel traitement des données manquantes."
+
+      - name: methode_traitement
+        description: "Méthode appliquée à la valeur."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - originale
+                  - interpolation_temporelle
+                  - mediane_pays
+                  - non_disponible
+
+      - name: est_imputee
+        description: "TRUE si la valeur a été imputée."
+        data_tests:
+          - not_null
+
+      - name: obs_status
+        description: "Statut de l'observation."
+
+      - name: decimal_places
+        description: "Nombre de décimales indiqué par l'API."
+
+      - name: inserted_at
+        description: "Date et heure d'ingestion de la version utilisée."
+        data_tests:
+          - not_null

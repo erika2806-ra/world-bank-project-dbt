@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: dim_pays
+    description: "Dimension des pays, territoires et agrégats présents dans les données World Bank."
+
+    columns:
+      - name: countryiso3code
+        description: "Code ISO3 ou code World Bank de l'entité."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: country_code
+        description: "Code de l'entité issu de l'API World Bank."
+
+      - name: country_name
+        description: "Nom du pays, territoire ou agrégat."
+        data_tests:
+          - not_null
