@@ -1,10 +1,18 @@
 # run_pipeline.py
 
+import logging
 import subprocess
 import time
 
 from load_data import ingest_data
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+logger = logging.getLogger(__name__)
 
 def avec_retry(action, essais=3, delai=5):
     """Lance une action et réessaie en cas d'erreur."""
@@ -13,11 +21,17 @@ def avec_retry(action, essais=3, delai=5):
         try:
             return action()
 
+        
         except Exception as e:
-            print(f"⚠️ Échec (tentative {tentative}/{essais}) : {e}")
+            logger.error(
+                f"Échec de l'action "
+                f"(tentative {tentative}/{essais}) : {e}"
+            )
 
             if tentative < essais:
-                print(f"↻ Nouvel essai dans {delai} secondes...")
+                logger.warning(
+                    f"Nouvel essai dans {delai} secondes."
+                )
                 time.sleep(delai)
 
     raise RuntimeError(
@@ -25,15 +39,20 @@ def avec_retry(action, essais=3, delai=5):
     )
 
 
-print("=== 1. Ingestion World Bank → BigQuery ===")
+
+logger.info("Étape 1 : ingestion World Bank → BigQuery")
 avec_retry(ingest_data, essais=3, delai=5)
 
 
-print("\n=== 2. Transformation dbt ===")
+
+logger.info("Étape 2 : transformation dbt")
 subprocess.run(
-    ["uv", "run", "dbt", "run"],
+    ["dbt", "run"],
     check=True,
 )
 
 
-print("\n✅ Pipeline terminé : données ingérées et transformées.")
+
+logger.info(
+    "Pipeline terminé : données ingérées et transformées."
+)
