@@ -1,0 +1,56 @@
+name: Pipeline (ingestion + dbt)
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupère le code du repository
+      - name: Récupérer le code
+        uses: actions/checkout@v5
+
+      # 2. Installe Python
+      - name: Installer Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # 3. Installe les dépendances Python
+      - name: Installer les dépendances
+        run: pip install -r world_bank_project/requirements.txt
+
+      # 4. Recrée la clé BigQuery depuis le secret GitHub
+      - name: Créer la clé BigQuery
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > "$GITHUB_WORKSPACE/cle_bigquery.json"
+
+      # 5. Crée le profil dbt sur la machine GitHub Actions
+      - name: Configurer le profil dbt
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<EOF
+          world_bank_project:
+            target: dev
+            outputs:
+              dev:
+                type: bigquery
+                method: service-account
+                project: data-quest-erika
+                dataset: dbt_project
+                keyfile: $GITHUB_WORKSPACE/cle_bigquery.json
+                location: US
+              
+          EOF
+
+      # 6. Lance ingestion + dbt
+      - name: Lancer le pipeline
+        working-directory: world_bank_project
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/cle_bigquery.json
+        run: python run_pipeline.py
