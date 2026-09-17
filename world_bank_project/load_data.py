@@ -44,6 +44,11 @@ TABLE_ID = "raw_data"
 
 FULL_TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
 
+COUNTRY_METADATA_TABLE_ID = "country_metadata"
+
+FULL_COUNTRY_METADATA_TABLE_ID = (
+    f"{PROJECT_ID}.{DATASET_ID}.{COUNTRY_METADATA_TABLE_ID}"
+)
 
 API_PAGE_SIZE = 20000
 REQUEST_TIMEOUT_SECONDS = 30
@@ -342,6 +347,91 @@ def annuler_le_lot(
         f"Rollback effectué : lot {batch_id} supprimé."
     )
 
+def recuperer_metadonnees_pays():
+    """Récupère et prépare les métadonnées pays de la Banque mondiale."""
+
+    url = "https://api.worldbank.org/v2/country"
+
+    params = {
+        "format": "json",
+        "per_page": 400,
+    }
+
+    response = requests.get(
+        url,
+        params=params,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not isinstance(data, list) or len(data) < 2:
+        raise ValueError(
+            "Structure inattendue pour les métadonnées pays."
+        )
+
+    entites = []
+
+    for p in data[1]:
+
+        region = p.get("region") or {}
+        income_level = p.get("incomeLevel") or {}
+
+        region_name = region.get("value")
+
+        if region_name == "Aggregates":
+            type_entite = "agregat"
+        else:
+            type_entite = "pays_ou_territoire"
+
+        entites.append(
+            {
+                "countryiso3code": p.get("id"),
+                "country_name": p.get("name"),
+                "region": region_name,
+                "income_level": income_level.get("value"),
+                "type_entite": type_entite,
+            }
+        )
+
+    logger.info(
+        f"{len(entites)} métadonnées pays préparées"
+    )
+
+    return entites
+
+def charger_metadonnees_pays(client):
+    """Charge les métadonnées pays dans BigQuery."""
+
+    entites = recuperer_metadonnees_pays()
+
+    schema = [
+        bigquery.SchemaField("countryiso3code", "STRING"),
+        bigquery.SchemaField("country_name", "STRING"),
+        bigquery.SchemaField("region", "STRING"),
+        bigquery.SchemaField("income_level", "STRING"),
+        bigquery.SchemaField("type_entite", "STRING"),
+    ]
+
+    job_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+    )
+
+    job = client.load_table_from_json(
+        entites,
+        FULL_COUNTRY_METADATA_TABLE_ID,
+        job_config=job_config,
+    )
+
+    job.result()
+
+    logger.info(
+        f"{len(entites)} métadonnées pays chargées dans "
+        f"{FULL_COUNTRY_METADATA_TABLE_ID}"
+    )
+
 def ingest_data():
     """
     Récupère les données World Bank et charge
@@ -363,9 +453,13 @@ def ingest_data():
     # Récupération API
     lignes_api = recuperer_donnees_world_bank()
 
+    
     # Pas de project=PROJECT_ID :
     # le projet est déjà connu grâce aux credentials.
     client = bigquery.Client()
+
+    # Mise à jour des métadonnées pays
+    charger_metadonnees_pays(client)
 
     # Récupération des hash déjà présents
     existing_hashes = recuperer_hash_existants(
@@ -471,6 +565,7 @@ def ingest_data():
 # ---------------------------------------------------------
 # EXÉCUTION DIRECTE
 # ---------------------------------------------------------
+
 
 if __name__ == "__main__":
     logging.basicConfig(

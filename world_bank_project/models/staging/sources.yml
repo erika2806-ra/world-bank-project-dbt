@@ -44,3 +44,29 @@ sources:
             description: "Date et heure d'insertion dans BigQuery."
             data_tests:
               - not_null
+
+      - name: country_metadata
+        description: "Métadonnées des pays, territoires et agrégats issues de l'API World Bank."
+
+        columns:
+          - name: countryiso3code
+            description: "Code de l'entité géographique."
+            data_tests:
+              - not_null
+              - unique
+
+          - name: country_name
+            description: "Nom du pays, territoire ou agrégat."
+            data_tests:
+              - not_null
+
+          - name: region
+            description: "Région World Bank de l'entité."
+
+          - name: income_level
+            description: "Niveau de revenu de l'entité."
+
+          - name: type_entite
+            description: "Type d'entité : pays_ou_territoire ou agregat."
+            data_tests:
+              - not_null

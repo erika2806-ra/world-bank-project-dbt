@@ -18,6 +18,18 @@ with source as (
 
 ),
 
+country_metadata as (
+
+    select
+        countryiso3code,
+        region,
+        income_level,
+        type_entite
+
+    from {{ source('world_bank', 'country_metadata') }}
+
+),
+
 renamed as (
 
     select
@@ -43,20 +55,30 @@ renamed as (
 
 ),
 
+
 classified as (
 
     select
-        *,
+        r.*,
+
+        m.region,
+        m.income_level,
 
         case
-            when countryiso3code is null
+            when m.type_entite is not null
+                then m.type_entite
+            when r.countryiso3code is null
                 then 'agregat'
-            else 'pays_ou_territoire'
+            else 'inconnu'
         end as type_entite
 
-    from renamed
+    from renamed as r
+
+    left join country_metadata as m
+        on r.countryiso3code = m.countryiso3code
 
 ),
+
 
 ranked as (
 
@@ -85,6 +107,8 @@ select
     country_code,
     country_name,
     countryiso3code,
+    region,
+    income_level,
     type_entite,
     annee,
     valeur,

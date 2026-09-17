@@ -3,7 +3,9 @@
 select distinct
     countryiso3code,
     country_code,
-    country_name
+    country_name,
+    region,
+    income_level
 
 from {{ ref('stg_world_bank') }}
 
