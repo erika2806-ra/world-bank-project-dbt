@@ -22,6 +22,7 @@ load_dotenv()
 INDICATORS = {
     "NY.GDP.MKTP.CD": "PIB",
     "NY.GDP.PCAP.CD": "PIB_par_habitant",
+    "NY.GNP.PCAP.CD": "RNB_par_habitant_Atlas",
     "NY.GDP.MKTP.KD.ZG": "Croissance_PIB",
     "SP.POP.TOTL": "Population",
     "SP.DYN.LE00.IN": "Esperance_vie",

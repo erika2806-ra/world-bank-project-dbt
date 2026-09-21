@@ -8,6 +8,7 @@ select
     case indicator_code
         when 'NY.GDP.MKTP.CD' then 'PIB'
         when 'NY.GDP.PCAP.CD' then 'PIB_par_habitant'
+        when 'NY.GNP.PCAP.CD' then 'RNB_par_habitant_Atlas'
         when 'NY.GDP.MKTP.KD.ZG' then 'Croissance_PIB'
         when 'SP.POP.TOTL' then 'Population'
         when 'SP.DYN.LE00.IN' then 'Esperance_vie'
