@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import pandas as pd
 from dotenv import load_dotenv
 from google.cloud import bigquery
 
@@ -25,33 +26,31 @@ if credentials_path:
 
 PROJECT_ID = "data-quest-erika"
 
-# Table de features propre créée par dbt
+# Table propre créée par dbt
 FEATURES_TABLE = (
     f"{PROJECT_ID}.marts.ml_country_features"
 )
 
-# Table qui recevra les prédictions
+# Une seule table pour Power BI :
+# test 2022 + prédictions de production 2023+
 PREDICTIONS_TABLE = (
     f"{PROJECT_ID}.ml.predictions"
 )
 
-# Pipeline final entraîné
+# Modèle final entraîné sur 2015-2022
 PIPELINE_PATH = Path(__file__).with_name(
     "pipeline.pkl"
 )
 
 
 # --------------------------------------------------
-# 2. Features utilisées par le modèle
+# 2. Les 7 features utilisées par le modèle
 # --------------------------------------------------
 
 FEATURES = [
     "Esperance_vie",
-    "Chomage",
     "Depense_de_sante",
-    "Achevement_primaire",
     "Scolarisation_secondaire",
-    "Scolarisation_superieur",
     "Depense_publique_education",
     "Taux_natalite",
     "CO2_par_habitant",
@@ -70,12 +69,17 @@ def predire():
 
 
     # --------------------------------------------------
-    # 4. Lire la table de features propre
+    # 4. Lire uniquement les années de production
+    #
+    # 2015-2021 = entraînement
+    # 2022      = test
+    # 2023+     = prédictions de production
     # --------------------------------------------------
 
     query = f"""
         SELECT *
         FROM `{FEATURES_TABLE}`
+        WHERE annee >= 2023
         ORDER BY
             annee,
             countryiso3code
@@ -87,7 +91,7 @@ def predire():
 
 
     print(
-        "Données chargées depuis BigQuery."
+        "Données de production chargées depuis BigQuery."
     )
 
     print(
@@ -97,7 +101,21 @@ def predire():
 
 
     # --------------------------------------------------
-    # 5. Charger le pipeline final
+    # 5. Vérifier s'il existe des données à prédire
+    # --------------------------------------------------
+
+    if df.empty:
+
+        print(
+            "Aucune donnée 2023 ou plus récente "
+            "à prédire."
+        )
+
+        return
+
+
+    # --------------------------------------------------
+    # 6. Charger le pipeline final
     # --------------------------------------------------
 
     pipeline = joblib.load(
@@ -110,27 +128,54 @@ def predire():
 
 
     # --------------------------------------------------
-    # 6. Faire les prédictions
+    # 7. Faire les prédictions
     # --------------------------------------------------
 
     df["income_level_predit"] = pipeline.predict(
         df[FEATURES]
     )
 
+    df["type_prediction"] = "Production"
+
+
+    # --------------------------------------------------
+    # 8. Comparer classe réelle et classe prédite
+    #
+    # Si income_level est NULL :
+    # la vraie classe n'est pas encore disponible.
+    # --------------------------------------------------
+
+    def comparer_prediction(row):
+
+        if row["income_level"] is None or str(row["income_level"]) == "<NA>":
+            return "En attente"
+
+        if row["income_level_predit"] == row["income_level"]:
+            return "Juste"
+
+        return "Faux"
+
+
+    df["prediction_correcte"] = df.apply(
+        comparer_prediction,
+        axis=1
+    )
+
+
+    # --------------------------------------------------
+    # 9. Date de la prédiction
+    # --------------------------------------------------
+
     df["date_prediction"] = datetime.now(
         timezone.utc
     )
 
-    print(
-        "Prédictions réalisées."
-    )
-
 
     # --------------------------------------------------
-    # 7. Préparer la table de sortie
+    # 10. Préparer les résultats
     # --------------------------------------------------
 
-    predictions = df[
+    predictions_production = df[
         [
             "countryiso3code",
             "country_name",
@@ -138,17 +183,80 @@ def predire():
             "annee",
             "income_level",
             "income_level_predit",
+            "type_prediction",
+            "prediction_correcte",
             "date_prediction",
         ]
     ].copy()
 
 
     # --------------------------------------------------
-    # 8. Remplacer la table ml.predictions
+    # 11. Récupérer le test 2022 déjà présent
+    #
+    # Le test a été créé une seule fois par
+    # entrainer_modele.py.
+    # --------------------------------------------------
+
+    query_test = f"""
+        SELECT *
+        FROM `{PREDICTIONS_TABLE}`
+        WHERE type_prediction = 'Test'
+    """
+
+    predictions_test = client.query(
+        query_test
+    ).to_dataframe()
+
+
+    print(
+        "Nombre de prédictions de test 2022 conservées :",
+        len(predictions_test)
+    )
+
+
+    # --------------------------------------------------
+    # 12. Combiner :
+    #
+    # test 2022
+    # +
+    # production 2023+
+    #
+    # Cela évite de recalculer le test 2022.
+    # --------------------------------------------------
+
+    predictions_finales = predictions_test[
+        [
+            "countryiso3code",
+            "country_name",
+            "region",
+            "annee",
+            "income_level",
+            "income_level_predit",
+            "type_prediction",
+            "prediction_correcte",
+            "date_prediction",
+        ]
+    ].copy()
+
+    
+    predictions_finales = pd.concat(
+        [
+            predictions_finales,
+            predictions_production
+        ],
+        ignore_index=True
+    )
+
+    # --------------------------------------------------
+    # 13. Remplacer ml.predictions
     #
     # WRITE_TRUNCATE :
-    # les anciennes prédictions sont supprimées
-    # et remplacées par les nouvelles.
+    # la table finale contient toujours :
+    #
+    # - le test 2022 conservé
+    # - les dernières prédictions 2023+
+    #
+    # Pas de doublons entre les exécutions quotidiennes.
     # --------------------------------------------------
 
     job_config = bigquery.LoadJobConfig(
@@ -157,24 +265,25 @@ def predire():
 
 
     client.load_table_from_dataframe(
-        predictions,
+        predictions_finales,
         PREDICTIONS_TABLE,
         job_config=job_config,
     ).result()
 
 
     print(
-        f"{len(predictions)} prédictions enregistrées "
+        f"{len(predictions_finales)} lignes enregistrées "
         f"dans {PREDICTIONS_TABLE}"
     )
 
     print(
-        "Les anciennes prédictions ont été remplacées."
+        "Test 2022 conservé et prédictions "
+        "2023+ actualisées."
     )
 
 
 # --------------------------------------------------
-# 9. Lancer le script
+# 14. Lancer le script
 # --------------------------------------------------
 
 if __name__ == "__main__":
