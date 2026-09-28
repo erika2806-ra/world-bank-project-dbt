@@ -145,16 +145,24 @@ def predire():
     # la vraie classe n'est pas encore disponible.
     # --------------------------------------------------
 
+    
+
     def comparer_prediction(row):
 
-        if row["income_level"] is None or str(row["income_level"]) == "<NA>":
+        valeur_reelle = row["income_level"]
+
+        # Valeur manquante : None, NaN ou <NA>
+        if (
+            valeur_reelle is None
+            or valeur_reelle != valeur_reelle
+            or str(valeur_reelle) == "<NA>"
+        ):
             return "En attente"
 
-        if row["income_level_predit"] == row["income_level"]:
+        if row["income_level_predit"] == valeur_reelle:
             return "Juste"
 
         return "Faux"
-
 
     df["prediction_correcte"] = df.apply(
         comparer_prediction,
