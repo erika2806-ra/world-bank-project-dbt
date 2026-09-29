@@ -100,7 +100,7 @@ Il permet de prédire la catégorie de revenu d'un pays parmi les quatre catégo
 - Upper-middle income
 - High income
 
-Le modèle utilise 7 features :
+Le modèle utilise 7 features, des indicateurs sociaux, éducatifs, démographiques et environnementaux :
 
 - espérance de vie ;
 - dépenses de santé ;
@@ -109,6 +109,8 @@ Le modèle utilise 7 features :
 - taux de natalité ;
 - émissions de CO₂ par habitant ;
 - accès à l'électricité.
+
+Ce modèle de Machine Learning permet d’évaluer si les indicateurs sociaux, éducatifs, démographiques et environnementaux permettent de distinguer les catégories de revenu de la Banque mondiale, sans utiliser d’indicateurs économiques pour réaliser les prédictions.
 
 Pour l'évaluation du modèle :
 
@@ -207,6 +209,10 @@ erDiagram
 
 Chaque ligne de `fact_indicators` correspond à la valeur d'un indicateur pour un pays et une année.
 
+### Dictionnaire de données
+
+La description détaillée des tables et de leurs colonnes est disponible dans le [dictionnaire de données](docs/dictionnaire_donnees.md).
+
 ## Automatisation
 
 Le pipeline est automatisé avec GitHub Actions.
@@ -228,8 +234,6 @@ Le modèle de Machine Learning n'est pas réentraîné automatiquement à chaque
 Certaines données récentes de la Banque mondiale peuvent être manquantes ou publiées avec retard.
 
 La qualité des prédictions dépend donc de la disponibilité des indicateurs utilisés par le modèle.
-
-Lorsqu'une catégorie réelle n'est pas encore disponible, la prédiction ne peut pas encore être évaluée et reste indiquée comme "En attente".
 
 Le modèle permet d'identifier des associations et des facteurs prédictifs, mais il ne permet pas à lui seul d'établir une relation de causalité entre les indicateurs et le niveau de développement d'un pays.
 
