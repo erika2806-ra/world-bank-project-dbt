@@ -209,9 +209,11 @@ erDiagram
 
 Chaque ligne de `fact_indicators` correspond à la valeur d'un indicateur pour un pays et une année.
 
+
 ### Dictionnaire de données
 
-La description détaillée des tables et de leurs colonnes est disponible dans le [dictionnaire de données](docs/dictionnaire_donnees.md).
+La description détaillée des tables et de leurs colonnes est disponible dans le [dictionnaire de données](world_bank_project/docs/dictionnaire_donnees.md).
+
 
 ## Automatisation
 
